@@ -2,6 +2,7 @@ package ch.endte.syncmatica.mixin;
 
 import ch.endte.syncmatica.communication.ExchangeTarget;
 import ch.endte.syncmatica.mixin_actor.ActorClientPlayNetworkHandler;
+import ch.endte.syncmatica.network.ChannelManager;
 import ch.endte.syncmatica.network.SyncmaticaPayload;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayNetworkHandler;
@@ -21,11 +22,11 @@ public abstract class MixinClientPlayNetworkHandler {
 
     @Inject(method = "method_52801", at = @At("HEAD"), cancellable = true)
     private void handlePacket(CustomPayload customPayload, CallbackInfo ci) {
-        // ChannelManager.onChannelRegisterHandle(getExchangeTarget(), packet.getChannel(), packet.getData());
-        if (!MinecraftClient.getInstance().isOnThread()) {
-            return; //only execute packet on main thread
-        }
         if (customPayload instanceof SyncmaticaPayload payload) {
+            ChannelManager.onChannelRegisterHandle(getExchangeTarget(), payload.id(), payload.byteBuf());
+            if (!MinecraftClient.getInstance().isOnThread()) {
+                return; //only execute packet on main thread
+            }
             ActorClientPlayNetworkHandler.getInstance().packetEvent((ClientPlayNetworkHandler) (Object) this, payload, ci);
         }
     }

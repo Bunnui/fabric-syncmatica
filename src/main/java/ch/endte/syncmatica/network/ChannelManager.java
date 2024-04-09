@@ -1,23 +1,34 @@
 package ch.endte.syncmatica.network;
 
-import ch.endte.syncmatica.Syncmatica;
 import ch.endte.syncmatica.communication.ExchangeTarget;
 import ch.endte.syncmatica.communication.PacketType;
-import ch.endte.syncmatica.util.StringTools;
 import io.netty.buffer.Unpooled;
 import net.minecraft.network.PacketByteBuf;
 import net.minecraft.util.Identifier;
-import org.slf4j.LoggerFactory;
 
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 public class ChannelManager {
-    private static final Identifier MINECRAFT_REGISTER = new Identifier("minecraft:register");
-    private static final Identifier MINECRAFT_UNREGISTER = new Identifier("minecraft:unregister");
-    private static final List<Identifier> serverRegisterChannels = new ArrayList<>();
-    private static final List<Identifier> clientRegisterChannels = new ArrayList<>();
+    public static final Identifier MINECRAFT_REGISTER = new Identifier("minecraft:register");
+    public static final Identifier MINECRAFT_UNREGISTER = new Identifier("minecraft:unregister");
+    private static final Map<ExchangeTarget, List<Identifier>> serverRegisteredChannels = new HashMap<>();
+    private static final List<Identifier> clientRegisteredChannels = new ArrayList<>();
+
+    public static void initSendRegister(ExchangeTarget target) {
+        // 构建数据
+        PacketByteBuf byteBuf = new PacketByteBuf(Unpooled.buffer());
+        for (PacketType identifierType : PacketType.values()) {
+            Identifier identifier = identifierType.identifier;
+            byte[] bytes = identifier.toString().getBytes(StandardCharsets.UTF_8);
+            byteBuf.writeBytes(bytes);
+            byteBuf.writeByte(0x00);
+        }
+        // 有数据时才有意义发送
+        if (byteBuf.writerIndex() > 0) {
+            target.sendPacket(MINECRAFT_REGISTER, byteBuf, null);
+        }
+    }
 
     private static List<Identifier> onReadRegisterIdentifier(PacketByteBuf data) {
         List<Identifier> identifiers = new ArrayList<>();
@@ -35,33 +46,51 @@ public class ChannelManager {
     }
 
     public static void onChannelRegisterHandle(ExchangeTarget target, Identifier channel, PacketByteBuf data) {
-        if (channel.equals(MINECRAFT_REGISTER)) {
-            // 拷贝一份数据, 因为可能其他插件也存在通道
-            List<Identifier> identifiers = onReadRegisterIdentifier(new PacketByteBuf(data.copy()));
-            // 检查客户端是否已经注册该标识符, 如果已经注册那么向服务端发送注册请求
-            PacketByteBuf byteBuf2 = new PacketByteBuf(Unpooled.buffer());
-            List<Identifier> registerChannels = target.isClient() ? clientRegisterChannels : serverRegisterChannels;
-            for (Identifier identifier : identifiers) {
-                if (!registerChannels.contains(identifier) && PacketType.containsIdentifier(identifier)) {
-                    LoggerFactory.getLogger("").info(identifier.toString());
-                    byte[] bytes = identifier.toString().getBytes(StandardCharsets.UTF_8);
-                    byteBuf2.writeBytes(bytes);
-                    byteBuf2.writeByte(0x00);
-                }
-            }
-            // 有数据时才有意义发送
-            if (byteBuf2.writerIndex() > 0) {
-                target.sendPacket(MINECRAFT_REGISTER, byteBuf2, null);
+        if (!channel.equals(MINECRAFT_REGISTER)) {
+            return;
+        }
+        // 拷贝一份数据进行处理, 因为可能其他插件(fabric-api)也存在通道
+        List<Identifier> identifiers = onReadRegisterIdentifier(new PacketByteBuf(data.copy()));
+        // 获取已当前目标已注册的标识符
+        List<Identifier> registeredChannels = target.isClient() ? clientRegisteredChannels : serverRegisteredChannels.computeIfAbsent(target, value -> new ArrayList<>());
+        // 构建数据
+        PacketByteBuf byteBuf2 = new PacketByteBuf(Unpooled.buffer());
+        for (Identifier identifier : identifiers) {
+            // 当前模组支持该通道且未被注册
+            if (PacketType.containsIdentifier(identifier) && !registeredChannels.contains(identifier)) {
+                // LoggerFactory.getLogger("").info(identifier.toString());
+                byte[] bytes = identifier.toString().getBytes(StandardCharsets.UTF_8);
+                byteBuf2.writeBytes(bytes);
+                byteBuf2.writeByte(0x00);
             }
         }
-//        else if (channel.equals(MINECRAFT_UNREGISTER)) {
-//            //TODO: 待实现，主要不知道数据格式，不过好像不影响使用
-//        }
+        // 有数据时才有意义发送
+        if (byteBuf2.writerIndex() > 0) {
+            target.sendPacket(MINECRAFT_REGISTER, byteBuf2, null);
+        }
     }
 
+    public static void onChannelUnRegisterHandle(ExchangeTarget target, Identifier channel, PacketByteBuf data) {
+        if (!channel.equals(MINECRAFT_UNREGISTER)) {
+            return;
+        }
+        // 拷贝一份数据进行处理, 因为可能其他插件(fabric-api)也存在通道
+        List<Identifier> identifiers = onReadRegisterIdentifier(new PacketByteBuf(data.copy()));
+        // 获取已当前目标已注册的标识符
+        List<Identifier> registeredChannels = target.isClient() ? clientRegisteredChannels : serverRegisteredChannels.computeIfAbsent(target, value -> new ArrayList<>());
+        // 删除当前模组已注册的通道
+        identifiers.removeIf(registeredChannels::contains);
+    }
 
-    public static void onDisconnected() {
-        clientRegisterChannels.clear();
-        serverRegisterChannels.clear();
+    public static void onClientDisconnected() {
+        clientRegisteredChannels.clear();
+    }
+
+    public static void onServerDisconnected() {
+        serverRegisteredChannels.clear();
+    }
+
+    public static void onServerPlayerDisconnected(ExchangeTarget target) {
+        serverRegisteredChannels.remove(target);
     }
 }

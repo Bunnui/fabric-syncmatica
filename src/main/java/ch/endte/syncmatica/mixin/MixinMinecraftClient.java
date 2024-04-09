@@ -16,7 +16,7 @@ public class MixinMinecraftClient {
 
     @Inject(method = "disconnect()V", at = @At("HEAD"))
     private void shutdownSyncmatica(final CallbackInfo ci) {
-        ChannelManager.onDisconnected();
+        ChannelManager.onClientDisconnected();
         ScreenHelper.close();
         Syncmatica.shutdown();
         LitematicManager.clear();
