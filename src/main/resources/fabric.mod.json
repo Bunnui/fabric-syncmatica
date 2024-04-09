@@ -16,7 +16,7 @@
 	"entrypoints": {},
 	"mixins": [
 		"syncmatica.mixin.json",
-		"syncmatica.litematica_mixin.json"
+		"litematica.mixin.json"
 	],
 	"depends": {
 	},
